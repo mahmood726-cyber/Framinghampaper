@@ -1,0 +1,12 @@
+name: Parse and disclosure checks
+on:
+  push:
+  pull_request:
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - run: Rscript -e "parse(file='app.R')"
+      - run: python3 -m unittest discover -s tests -v

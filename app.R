@@ -1,5 +1,5 @@
 # ====================================================================================
-# "PRO" VERSION V8 - SELF-CONTAINED RESEARCH WORKBENCH (COMPLETED)
+# ILLUSTRATIVE RESEARCH DEMONSTRATION — NOT A CLINICAL PREDICTION MODEL
 # Features: Embedded Dataset, Dynamic Model Building, SHAP, Model Comparison
 # ====================================================================================
 
@@ -17,7 +17,7 @@ library(fastshap)
 
 # -- 2. EMBEDDED DATA & PREP --
 
-# The entire Framingham dataset is embedded directly into the script as a string.
+# A 90-record Framingham-style example is embedded; source provenance is NOT verified.
 csv_data_string <- "male,age,education,currentSmoker,cigsPerDay,BPMeds,prevalentStroke,prevalentHyp,diabetes,totChol,sysBP,diaBP,BMI,heartRate,glucose,TenYearCHD
 1,39,4,0,0,0,0,0,0,195,106,70,26.97,80,77,0
 0,46,2,0,0,0,0,0,0,250,121,81,28.73,95,76,0
@@ -135,13 +135,14 @@ outcome_choices <- c("totChol", "sysBP", "glucose")
 ui <- tagList(
   useShinyjs(),
   navbarPage(
-    "Cardiac Analysis Research Workbench (PRO)",
+    "Exploratory Model Demonstration (90 records)",
     theme = shinytheme("cosmo"),
 
     # --- TAB 1: INTERACTIVE ANALYSIS ---
     tabPanel("Analysis Workbench",
              sidebarLayout(
                sidebarPanel(
+                 p(strong("Demonstration using 90 embedded records with unverified provenance. Not a validated clinical risk tool.")),
                  h4("1. Select Analysis Parameters"),
                  selectInput("outcome", "Outcome Variable:", choices = outcome_choices, selected = "totChol"),
                  checkboxGroupInput("predictors", "Predictor Variables:", choices = predictor_choices, selected = predictor_choices),
@@ -181,7 +182,7 @@ ui <- tagList(
     ),
 
     # --- TAB 2: LIVE PREDICTION ---
-    tabPanel("Live Patient Prediction",
+    tabPanel("Hypothetical Inputs (not clinical)",
              conditionalPanel(
                condition = "!output.model_ready",
                fluidPage(
@@ -194,11 +195,11 @@ ui <- tagList(
                condition = "output.model_ready",
                sidebarLayout(
                  sidebarPanel(
-                   h4("Enter New Patient Details"),
+                   h4("Enter hypothetical values (no patient use)"),
                    uiOutput("live_predictor_controls")
                  ),
                  mainPanel(
-                   h3("Prediction"),
+                   h3("Illustrative fitted output"),
                    div(style = "border: 1px solid #ddd; padding: 15px; border-radius: 5px; background-color: #f0f8ff;",
                        h4(textOutput("live_prediction_text"))
                    ),
@@ -251,7 +252,8 @@ server <- function(input, output, session) {
         select(all_of(c(input$outcome, input$predictors))) %>%
         na.omit()
 
-      validate(need(nrow(model_data) > 0, "No complete data for the selected outcome and predictors."))
+      validate(need(nrow(model_data) >= 30, "At least 30 complete demo records are required."))
+      set.seed(20261017)  # Reproducible cross-validation splits and model training
 
       setProgress(2/3, detail = "Cross-validating...")
 
@@ -271,6 +273,7 @@ server <- function(input, output, session) {
       new_result <- list(
         model = model,
         explainer = explainer,
+        X_background = X_shap,
         outcome = input$outcome,
         predictors = input$predictors,
         timestamp = Sys.time()
@@ -325,7 +328,10 @@ server <- function(input, output, session) {
 
   output$shap_summary_plot <- renderPlot({
     req(analysis_results())
-    plot(analysis_results()$explainer, type = "summary", main = "Latest Model: SHAP Summary Plot")
+    scores <- colMeans(abs(as.matrix(analysis_results()$explainer)), na.rm = TRUE)
+    barplot(sort(scores), horiz = TRUE, las = 1,
+            xlab = "Mean absolute approximate SHAP contribution",
+            main = "Illustrative feature contributions")
   })
   
   # --- COMPARISON TAB LOGIC ---
@@ -387,8 +393,10 @@ server <- function(input, output, session) {
       explainer2 <- hist_data[[1]]$explainer
       
       par(mfrow = c(1, 2))
-      plot(explainer1, type = "summary", main = paste("Older Run:", hist_data[[2]]$model$modelInfo$label))
-      plot(explainer2, type = "summary", main = paste("Latest Run:", hist_data[[1]]$model$modelInfo$label))
+      barplot(sort(colMeans(abs(as.matrix(explainer1)))), horiz = TRUE, las = 1,
+              main = "Older model", xlab = "Mean |approx. SHAP|")
+      barplot(sort(colMeans(abs(as.matrix(explainer2)))), horiz = TRUE, las = 1,
+              main = "Latest model", xlab = "Mean |approx. SHAP|")
       par(mfrow = c(1, 1))
   })
 
@@ -402,7 +410,7 @@ server <- function(input, output, session) {
     if ("Gender" %in% predictors) controls[[2]] <- selectInput("live_gender", "Gender:", choices = c("Male", "Female"))
     if ("BMI" %in% predictors) controls[[3]] <- sliderInput("live_bmi", "BMI:", min = 15, max = 50, value = 25, step = 0.1)
     
-    tagList(controls, actionButton("live_predict_btn", "Predict", class = "btn-success"))
+    tagList(controls, actionButton("live_predict_btn", "Demonstrate model output", class = "btn-primary"))
   })
 
   live_prediction_data <- eventReactive(input$live_predict_btn, {
@@ -421,7 +429,13 @@ server <- function(input, output, session) {
     
     prediction_value <- predict(model_info$model, newdata = new_patient_df)
     
-    shap_explanation <- fastshap::explain(model_info$model, X = new_patient_df, pred_wrapper = predict)
+    # Explain the hypothetical row against training-background records;
+    # using the single prediction row as background produces trivial SHAP values.
+    shap_explanation <- fastshap::explain(
+      model_info$model, X = model_info$X_background, newdata = new_patient_df,
+      pred_wrapper = function(object, newdata) as.numeric(predict(object, newdata = newdata)),
+      nsim = 100, adjust = TRUE
+    )
     
     return(list(
       prediction = prediction_value,
@@ -432,12 +446,16 @@ server <- function(input, output, session) {
   output$live_prediction_text <- renderText({
     req(live_prediction_data())
     pred_obj <- live_prediction_data()$prediction
-    paste0("Predicted ", analysis_results()$outcome, ": ", round(pred_obj, 2))
+    paste0("Illustrative fitted ", analysis_results()$outcome, ": ", round(pred_obj, 2),
+           " (not validated for patient care)")
   })
 
   output$live_shap_plot <- renderPlot({
     req(live_prediction_data())
-    plot(live_prediction_data()$shap_explanation, type = "individual", row_num = 1)
+    values <- as.numeric(live_prediction_data()$shap_explanation[1, , drop = TRUE])
+    names(values) <- colnames(live_prediction_data()$shap_explanation)
+    barplot(values, horiz = TRUE, las = 1,
+            xlab = "Approximate SHAP contribution", main = "Hypothetical result explanation")
   })
 }
 
